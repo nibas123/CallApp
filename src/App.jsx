@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import WebRTCService from './services/webrtc'
 import WebSocketService from './services/websocket'
-import RenderWakeupService from './services/renderWakeup'
+import RenderWakeupService from './services/renderWakeUp'
 
 // Hardcoded user configuration
 const USERS = {
