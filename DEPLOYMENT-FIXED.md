@@ -110,6 +110,23 @@ If you see connection issues:
    vercel --prod
    ```
 
+### Troubleshooting Build Issues
+
+If you see "PostCSS config" or "module is not defined" errors:
+
+1. **The project uses PostCSS config with `.cjs` extension** for ES module compatibility
+2. **If build fails**, ensure you have these files:
+   - ✅ `postcss.config.cjs` (correct)
+   - ❌ `postcss.config.js` (remove this if it exists)
+
+3. **Force clean deployment**:
+   ```bash
+   git add .
+   git commit -m "Fix PostCSS config for deployment"
+   git push
+   vercel --prod --force
+   ```
+
 ### Verify Everything Works
 
 1. **Backend health check**: Visit `https://your-render-url.onrender.com/health`
