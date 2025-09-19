@@ -127,6 +127,21 @@ If you see "PostCSS config" or "module is not defined" errors:
    vercel --prod --force
    ```
 
+If you see "Could not resolve" import errors:
+
+1. **Check import paths match actual filenames** (case-sensitive)
+2. **Verify all service files exist**:
+   - ✅ `src/services/webrtc.js`
+   - ✅ `src/services/websocket.js` 
+   - ✅ `src/services/renderWakeup.js`
+
+3. **Clean and rebuild**:
+   ```bash
+   rm -rf node_modules dist
+   npm install
+   npm run build
+   ```
+
 ### Verify Everything Works
 
 1. **Backend health check**: Visit `https://your-render-url.onrender.com/health`

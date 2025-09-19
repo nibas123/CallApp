@@ -1,17 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import WebRTCService from './services/webrtc'
 import WebSocketService from './services/websocket'
-import RenderWakeupService from './services/renderWakeUp'
+import RenderWakeupService from './services/renderWakeup'
+import ContactsService from './services/contacts'
+import ContactsManager from './components/ContactsManager'
 
-// Hardcoded user configuration
-const USERS = {
-  user1: { id: 'user1', name: 'John', callTo: 'user2' },
-  user2: { id: 'user2', name: 'Mary', callTo: 'user1' }
-}
-
-// Set current user (change this to switch between users)
-const CURRENT_USER = USERS.user1
-const CONTACT = USERS[CURRENT_USER.callTo]
+// Remove hardcoded users - now using dynamic contacts system
 
 function App() {
   const [callState, setCallState] = useState('idle') // 'idle', 'calling', 'connected', 'ended'
@@ -19,13 +13,26 @@ function App() {
   const [error, setError] = useState('')
   const [isWakingUp, setIsWakingUp] = useState(false)
   const [callDuration, setCallDuration] = useState(0)
+  const [showContacts, setShowContacts] = useState(false)
+  const [currentUser, setCurrentUser] = useState(null)
+  const [targetContact, setTargetContact] = useState(null)
+  const [availableContacts, setAvailableContacts] = useState([])
   
   const webrtcRef = useRef(null)
   const wsRef = useRef(null)
   const wakeupRef = useRef(null)
+  const contactsRef = useRef(null)
   const callTimerRef = useRef(null)
 
   useEffect(() => {
+    // Initialize contacts service
+    contactsRef.current = new ContactsService()
+    const user = contactsRef.current.getCurrentUser()
+    const contacts = contactsRef.current.getAvailableContacts()
+    setCurrentUser(user)
+    setAvailableContacts(contacts)
+    setTargetContact(contacts[0] || null)
+
     // Initialize services
     wsRef.current = new WebSocketService()
     webrtcRef.current = new WebRTCService()
@@ -99,7 +106,9 @@ function App() {
 
     // WebRTC event handlers
     webrtcRef.current.on('ice-candidate', (candidate) => {
-      wsRef.current.sendIceCandidate(CONTACT.id, candidate)
+      if (targetContact) {
+        wsRef.current.sendIceCandidate(targetContact.id, candidate)
+      }
     })
 
     webrtcRef.current.on('connected', () => {
@@ -133,8 +142,8 @@ function App() {
   }, [])
 
   const handleStartCall = async () => {
-    if (!isConnected) {
-      setError('Not connected to server')
+    if (!isConnected || !targetContact) {
+      setError(targetContact ? 'Not connected to server' : 'No contact selected')
       return
     }
 
@@ -143,7 +152,7 @@ function App() {
 
     try {
       const offer = await webrtcRef.current.createOffer()
-      wsRef.current.sendCallOffer(CONTACT.id, offer)
+      wsRef.current.sendCallOffer(targetContact.id, offer)
     } catch (err) {
       setError(`Failed to start call: ${err.message}`)
       setCallState('idle')
@@ -151,8 +160,8 @@ function App() {
   }
 
   const handleEndCall = () => {
-    if (callState !== 'idle') {
-      wsRef.current.sendEndCall(CONTACT.id)
+    if (callState !== 'idle' && targetContact) {
+      wsRef.current.sendEndCall(targetContact.id)
       webrtcRef.current.endCall()
       setCallState('ended')
       // Stop call timer
@@ -165,6 +174,33 @@ function App() {
         setCallDuration(0)
       }, 2000)
     }
+  }
+
+  // Helper functions for contacts management
+  const refreshContacts = () => {
+    if (contactsRef.current) {
+      const user = contactsRef.current.getCurrentUser()
+      const contacts = contactsRef.current.getAvailableContacts()
+      setCurrentUser(user)
+      setAvailableContacts(contacts)
+      
+      // Update target contact if current one is no longer available
+      if (targetContact && !contacts.find(c => c.id === targetContact.id)) {
+        setTargetContact(contacts[0] || null)
+      }
+      
+      // Reconnect WebSocket with new user ID if changed
+      if (wsRef.current && user.id !== currentUser?.id) {
+        wsRef.current.disconnect()
+        wsRef.current.connect(user.id)
+      }
+    }
+  }
+
+  const formatCallDuration = (seconds) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
   const getCallStatusText = () => {
@@ -201,32 +237,78 @@ function App() {
       {/* Main Content */}
       <div className="flex-1 flex flex-col justify-center items-center p-8">
         {callState === 'idle' ? (
-          /* Home Screen - Big Call Button */
+          /* Home Screen - Contact Selection & Call Button */
           <div className="text-center">
-            <div className="mb-8">
-              <div className="text-6xl md:text-8xl mb-4">📞</div>
-              <h2 className="text-3xl md:text-4xl font-semibold mb-2">
-                {CONTACT.name}
-              </h2>
-              <p className="text-xl md:text-2xl text-gray-300">
-                Tap to call
-              </p>
-            </div>
+            {targetContact ? (
+              <div className="mb-8">
+                <div className="text-6xl md:text-8xl mb-4">📞</div>
+                <h2 className="text-3xl md:text-4xl font-semibold mb-2">
+                  {targetContact.name}
+                </h2>
+                <p className="text-xl md:text-2xl text-gray-300">
+                  Tap to call
+                </p>
+                {targetContact.phone && (
+                  <p className="text-lg text-gray-400 mt-1">
+                    {targetContact.phone}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="mb-8">
+                <div className="text-6xl md:text-8xl mb-4">👥</div>
+                <h2 className="text-3xl md:text-4xl font-semibold mb-2">
+                  No Contacts
+                </h2>
+                <p className="text-xl md:text-2xl text-gray-300">
+                  Add contacts to start calling
+                </p>
+              </div>
+            )}
+            
+            {/* Contact Selection (if multiple contacts) */}
+            {availableContacts.length > 1 && (
+              <div className="mb-6">
+                <select
+                  value={targetContact?.id || ''}
+                  onChange={(e) => {
+                    const contact = availableContacts.find(c => c.id === e.target.value)
+                    setTargetContact(contact || null)
+                  }}
+                  className="bg-gray-700 text-white text-xl p-3 rounded-lg border border-gray-600"
+                >
+                  {availableContacts.map(contact => (
+                    <option key={contact.id} value={contact.id}>
+                      {contact.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             
             <button
               onClick={handleStartCall}
-              disabled={!isConnected || isWakingUp}
+              disabled={!isConnected || isWakingUp || !targetContact}
               className={`
                 w-64 h-64 md:w-80 md:h-80 rounded-full text-white font-bold text-2xl md:text-3xl
                 transition-all duration-200 touch-target high-contrast
-                ${isConnected && !isWakingUp
+                ${isConnected && !isWakingUp && targetContact
                   ? 'bg-green-500 hover:bg-green-600 active:bg-green-700 shadow-lg hover:shadow-xl' 
                   : 'bg-gray-600 cursor-not-allowed'
                 }
               `}
             >
               {isWakingUp ? 'Waking up...' : 
-               isConnected ? `Call ${CONTACT.name}` : 'Connecting...'}
+               !targetContact ? 'No Contact' :
+               isConnected ? `Call ${targetContact.name}` : 'Connecting...'}
+            </button>
+            
+            {/* Manage Contacts Button */}
+            <button
+              onClick={() => setShowContacts(true)}
+              className="mt-6 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg text-lg font-semibold"
+            >
+              Manage Contacts
             </button>
           </div>
         ) : (
@@ -237,15 +319,20 @@ function App() {
                 {callState === 'connected' ? '🔊' : '📞'}
               </div>
               <h2 className="text-4xl md:text-5xl font-semibold mb-2">
-                {CONTACT.name}
+                {targetContact?.name || 'Unknown'}
               </h2>
               <p className="text-2xl md:text-3xl text-gray-300">
                 {getCallStatusText()}
               </p>
               {callState === 'connected' && (
-                <p className="text-lg md:text-xl text-green-400 mt-2">
-                  🔊 Speakerphone ON
-                </p>
+                <>
+                  <p className="text-lg md:text-xl text-green-400 mt-2">
+                    🔊 Speakerphone ON
+                  </p>
+                  <p className="text-xl md:text-2xl text-blue-400 mt-2">
+                    {formatCallDuration(callDuration)}
+                  </p>
+                </>
               )}
             </div>
             
@@ -281,7 +368,7 @@ function App() {
       {/* Footer */}
       <div className="bg-gray-800 p-4 text-center border-t border-gray-700">
         <p className="text-sm md:text-base text-gray-400">
-          User: {CURRENT_USER.name} ({CURRENT_USER.id})
+          User: {currentUser?.name || 'Unknown'} ({currentUser?.id || 'N/A'})
         </p>
         <div className="flex items-center justify-center space-x-2 mt-2">
           <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-400' : 'bg-red-400'}`}></div>
@@ -289,12 +376,24 @@ function App() {
             {isWakingUp ? 'Waking server...' : isConnected ? 'Connected' : 'Disconnected'}
           </span>
         </div>
+        <p className="text-xs text-gray-500 mt-1">
+          {availableContacts.length} contact{availableContacts.length !== 1 ? 's' : ''} available
+        </p>
         {callState === 'connected' && (
           <p className="text-xs md:text-sm text-blue-400 mt-1">
-            📞 Call time: {formatDuration(callDuration)}
+            📞 Call time: {formatCallDuration(callDuration)}
           </p>
         )}
       </div>
+
+      {/* Contacts Manager Modal */}
+      {showContacts && (
+        <ContactsManager
+          contactsService={contactsRef.current}
+          onContactsChange={refreshContacts}
+          onClose={() => setShowContacts(false)}
+        />
+      )}
     </div>
   )
 }
